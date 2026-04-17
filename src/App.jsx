@@ -19,6 +19,10 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
+// ─── CLOUDINARY CONFIG (YOUR ACTUAL CONFIG) ───────────────────────────────────
+const CLOUDINARY_CLOUD_NAME = "dsk9ockee";
+const CLOUDINARY_UPLOAD_PRESET = "Mr-robot-app";
+
 // ─── Firebase Helpers ─────────────────────────────────────────────────────────
 const msgsRef   = () => ref(db, "messages");
 const msgRef    = (id) => ref(db, `messages/${id}`);
@@ -106,6 +110,67 @@ const globalStyles = `
     0%,100%{transform:translateX(0)} 20%{transform:translateX(-8px)}
     40%{transform:translateX(8px)} 60%{transform:translateX(-6px)} 80%{transform:translateX(6px)}
   }
+
+  .delete-btn-visual {
+    position: absolute;
+    top: 5px;
+    right: -30px;
+    background: rgba(0,0,0,0.7);
+    border: 1px solid var(--red);
+    border-radius: 4px;
+    color: var(--red);
+    cursor: pointer;
+    padding: 2px 6px;
+    font-size: 10px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    font-family: var(--font-ui);
+    z-index: 10;
+  }
+  .message-container:hover .delete-btn-visual {
+    opacity: 1;
+  }
+  .message-container {
+    position: relative;
+  }
+  .image-preview {
+    max-width: 200px;
+    max-height: 150px;
+    border-radius: 8px;
+    margin-top: 8px;
+    cursor: pointer;
+    border: 1px solid var(--border);
+  }
+  .file-input-label {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-family: var(--font-ui);
+    color: var(--muted);
+    transition: all 0.2s;
+  }
+  .file-input-label:hover {
+    border-color: var(--glow);
+    color: var(--glow);
+  }
+  input[type="file"] {
+    display: none;
+  }
+  .uploading {
+    font-size: 10px;
+    color: var(--glow);
+    animation: pulse 1s infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
 `;
 
 // ─── Icon Component ───────────────────────────────────────────────────────────
@@ -121,12 +186,30 @@ function Icon({ name, size = 16, style }) {
     menu:   "M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z",
     close:  "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z",
     wifi:   "M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3a4.237 4.237 0 00-6 0zm-4-4l2 2a7.074 7.074 0 0110 0l2-2C15.14 9.14 8.87 9.14 5 13z",
+    delete: "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z",
+    image:  "M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z",
+    upload: "M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z",
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" style={style}>
       <path d={icons[name] || ""} />
     </svg>
   );
+}
+
+// ─── Image Upload Function (Cloudinary) ───────────────────────────────────────
+async function uploadToCloudinary(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+  
+  const response = await fetch(
+    `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
+    { method: "POST", body: formData }
+  );
+  
+  const data = await response.json();
+  return data.secure_url;
 }
 
 // ─── Countdown Badge ──────────────────────────────────────────────────────────
@@ -174,33 +257,35 @@ function Logo({ size = "normal" }) {
 }
 
 // ─── Message Bubble ───────────────────────────────────────────────────────────
-function MessageBubble({ msg, isAdmin, onUnlock }) {
+function MessageBubble({ msg, currentUserId, isAdmin, onUnlock, onDelete }) {
   const isFromAdmin = msg.from === "admin";
-  const align = isAdmin
-    ? (isFromAdmin ? "flex-end" : "flex-start")
-    : (isFromAdmin ? "flex-start" : "flex-end");
-  const bgColor = isFromAdmin
+  const isOwnMessage = (isAdmin && isFromAdmin) || (!isAdmin && !isFromAdmin && msg.userId === currentUserId);
+  
+  const align = isOwnMessage ? "flex-end" : "flex-start";
+  const bgColor = isOwnMessage
     ? "linear-gradient(135deg, #1e0a3c, #2d1160)"
     : "linear-gradient(135deg, #0f1030, #1a0e40)";
-  const borderColor = isFromAdmin ? "var(--glow)" : "var(--border)";
+  const borderColor = isOwnMessage ? "var(--glow)" : "var(--border)";
 
-  // Check if message is locked for the recipient
-  const isLocked = msg.locked === true;
+  const shouldBeLocked = !isOwnMessage && msg.timerSeconds && msg.timerSeconds > 0 && msg.locked !== false;
+  const showTimer = isOwnMessage && msg.countdown != null && msg.countdown > 0;
+  const showReceivedTimer = !isOwnMessage && !shouldBeLocked && msg.countdown != null && msg.countdown > 0;
 
   return (
-    <div className="fade-in" style={{ display: "flex", justifyContent: align, marginBottom: 12 }}>
+    <div className="message-container" style={{ display: "flex", justifyContent: align, marginBottom: 12 }}>
       <div style={{
         maxWidth: "72%", padding: "10px 14px",
         background: bgColor,
         border: `1px solid ${borderColor}`,
-        borderRadius: isFromAdmin ? "4px 16px 16px 16px" : "16px 4px 16px 16px",
+        borderRadius: isOwnMessage ? "4px 16px 16px 16px" : "16px 4px 16px 16px",
         boxShadow: "0 0 16px rgba(124,58,237,0.25), 0 2px 8px rgba(0,0,0,0.5)",
+        position: "relative",
       }}>
         <div style={{ fontSize: 9, color: "var(--muted)", fontFamily: "var(--font-ui)", marginBottom: 4, letterSpacing: 1 }}>
           {isFromAdmin ? "[ ADMIN ]" : `[ ${msg.userId} ]`}
         </div>
 
-        {isLocked ? (
+        {shouldBeLocked ? (
           <div style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
             onClick={() => onUnlock && onUnlock(msg.id)}>
             <div className="pulse-ring" style={{
@@ -219,12 +304,21 @@ function MessageBubble({ msg, isAdmin, onUnlock }) {
           </div>
         ) : (
           <div>
-            <span style={{ fontSize: 13, lineHeight: 1.5, color: "var(--text)", wordBreak: "break-word" }}>
-              {msg.text}
-            </span>
-            {msg.countdown != null && msg.countdown > 0 && (
-              <CountdownBadge seconds={msg.countdown} />
+            {msg.type === "image" ? (
+              <img 
+                src={msg.imageUrl} 
+                alt="Shared content"
+                className="image-preview"
+                style={{ maxWidth: "200px", maxHeight: "150px", borderRadius: "8px", cursor: "pointer" }}
+                onClick={() => window.open(msg.imageUrl, "_blank")}
+              />
+            ) : (
+              <span style={{ fontSize: 13, lineHeight: 1.5, color: "var(--text)", wordBreak: "break-word" }}>
+                {msg.text}
+              </span>
             )}
+            {showTimer && <CountdownBadge seconds={msg.countdown} />}
+            {showReceivedTimer && <CountdownBadge seconds={msg.countdown} />}
           </div>
         )}
 
@@ -232,6 +326,13 @@ function MessageBubble({ msg, isAdmin, onUnlock }) {
           {msg.ts ? new Date(msg.ts).toLocaleTimeString() : "..."}
         </div>
       </div>
+      
+      <button
+        onClick={() => onDelete && onDelete(msg.id)}
+        className="delete-btn-visual"
+      >
+        <Icon name="delete" size={10} /> DEL
+      </button>
     </div>
   );
 }
@@ -247,7 +348,7 @@ function TimerInput({ value, onChange }) {
         borderRadius: 6, padding: "4px 6px",
         fontSize: 11, fontFamily: "var(--font-ui)", cursor: "pointer",
       }}>
-        <option value={0}>No timer</option>
+        <option value={0}>No timer (stays forever)</option>
         <option value={10}>10s</option>
         <option value={30}>30s</option>
         <option value={60}>1m</option>
@@ -259,16 +360,27 @@ function TimerInput({ value, onChange }) {
   );
 }
 
-// ─── Input Row ────────────────────────────────────────────────────────────────
-function InputRow({ onSend, placeholder = "TYPE MESSAGE..." }) {
+// ─── Input Row with Image Upload ──────────────────────────────────────────────
+function InputRow({ onSend, onSendImage, placeholder = "TYPE MESSAGE...", uploading }) {
   const [text, setText] = useState("");
   const [timer, setTimer] = useState(0);
+  const fileInputRef = useRef(null);
 
   function handleSend() {
     if (!text.trim()) return;
     onSend(text.trim(), timer || null);
     setText("");
     setTimer(0);
+  }
+
+  function handleImageSelect(e) {
+    const file = e.target.files[0];
+    if (file && onSendImage) {
+      onSendImage(file, timer || null);
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
   }
 
   return (
@@ -289,21 +401,57 @@ function InputRow({ onSend, placeholder = "TYPE MESSAGE..." }) {
             padding: "10px 14px", transition: "all 0.2s",
           }}
         />
-        <button onClick={handleSend} style={{
+        
+        <label className="file-input-label">
+          <Icon name="image" size={14} />
+          {uploading ? "📤" : "IMG"}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleImageSelect}
+            disabled={uploading}
+          />
+        </label>
+        
+        <button onClick={handleSend} disabled={uploading} style={{
           background: "linear-gradient(135deg, var(--purple), var(--onion))",
-          border: "none", borderRadius: 8, color: "#fff", cursor: "pointer",
+          border: "none", borderRadius: 8, color: "#fff", cursor: uploading ? "not-allowed" : "pointer",
           padding: "0 16px", fontSize: 12, fontFamily: "var(--font-ui)", letterSpacing: 1,
           boxShadow: "0 0 16px rgba(124,58,237,0.5)", transition: "all 0.2s",
-          display: "flex", alignItems: "center", gap: 6,
-        }}
-          onMouseEnter={e => e.currentTarget.style.boxShadow = "0 0 24px rgba(168,85,247,0.8)"}
-          onMouseLeave={e => e.currentTarget.style.boxShadow = "0 0 16px rgba(124,58,237,0.5)"}
-        >
+          display: "flex", alignItems: "center", gap: 6, opacity: uploading ? 0.5 : 1,
+        }}>
           <Icon name="send" size={14} /> SEND
         </button>
       </div>
-      <TimerInput value={timer} onChange={setTimer} />
+      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        <TimerInput value={timer} onChange={setTimer} />
+        {uploading && <span className="uploading">Uploading image...</span>}
+      </div>
     </div>
+  );
+}
+
+// ─── Clear Chat Button ────────────────────────────────────────────────────────
+function ClearChatButton({ onClear, disabled }) {
+  return (
+    <button onClick={onClear} disabled={disabled} style={{
+      background: "rgba(239,68,68,0.2)",
+      border: "1px solid var(--red)",
+      borderRadius: 6,
+      color: "var(--red)",
+      cursor: disabled ? "not-allowed" : "pointer",
+      padding: "4px 10px",
+      fontSize: 10,
+      fontFamily: "var(--font-ui)",
+      letterSpacing: 1,
+      transition: "all 0.2s",
+      display: "flex",
+      alignItems: "center",
+      gap: 4,
+    }}>
+      <Icon name="delete" size={12} /> CLEAR ALL
+    </button>
   );
 }
 
@@ -313,14 +461,13 @@ function InputRow({ onSend, placeholder = "TYPE MESSAGE..." }) {
 function UserView() {
   const userId = getGuestId();
   const [messages, setMessages] = useState([]);
+  const [uploading, setUploading] = useState(false);
   const bottomRef = useRef(null);
 
-  // Register user in Firebase
   useEffect(() => {
     update(userRef(userId), { id: userId, lastSeen: Date.now() });
   }, [userId]);
 
-  // Listen to messages for this user
   useEffect(() => {
     const unsub = onValue(msgsRef(), snap => {
       const data = snap.val() || {};
@@ -333,27 +480,22 @@ function UserView() {
     return () => unsub();
   }, [userId]);
 
-  // Countdown timer effect - ONLY runs for messages that are NOT locked
   useEffect(() => {
     const interval = setInterval(() => {
       setMessages(prev => {
         let hasChanges = false;
         const updated = prev.map(msg => {
-          // Skip locked messages (they don't count down until unlocked)
-          if (msg.locked === true) return msg;
-          // Skip messages without countdown
           if (msg.countdown == null || msg.countdown <= 0) return msg;
+          if (msg.locked === true) return msg;
           
           const newCountdown = msg.countdown - 1;
           hasChanges = true;
           
           if (newCountdown <= 0) {
-            // Delete the message when timer reaches 0
             update(msgRef(msg.id), { deleted: true });
             return { ...msg, countdown: 0, deleted: true };
           }
           
-          // Update the countdown in Firebase
           update(msgRef(msg.id), { countdown: newCountdown });
           return { ...msg, countdown: newCountdown };
         });
@@ -369,6 +511,30 @@ function UserView() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" }); 
   }, [messages]);
 
+  async function handleSendImage(file, timerSeconds) {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const imageUrl = await uploadToCloudinary(file);
+      push(msgsRef(), {
+        userId,
+        from: "user",
+        type: "image",
+        imageUrl,
+        ts: Date.now(),
+        timerSeconds: timerSeconds || null,
+        countdown: timerSeconds || null,
+        locked: false,
+        deleted: false,
+      });
+    } catch (error) {
+      console.error("Upload failed:", error);
+      alert("Image upload failed. Check Cloudinary config.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
   function handleSend(text, timerSeconds) {
     push(msgsRef(), {
       userId,
@@ -376,22 +542,36 @@ function UserView() {
       text,
       ts: Date.now(),
       timerSeconds: timerSeconds || null,
-      countdown: timerSeconds || null,  // Sender's timer starts immediately
-      locked: false,  // User messages are never locked for the user themselves
+      countdown: timerSeconds || null,
+      locked: false,
       deleted: false,
     });
   }
 
-  // User unlocks an admin message
   function handleUnlock(msgId) {
     const msg = messages.find(m => m.id === msgId);
     if (!msg) return;
-    // When unlocking, set locked to false and start the countdown
     update(msgRef(msgId), {
       locked: false,
       countdown: msg.timerSeconds || null,
     });
   }
+
+  function handleDelete(msgId) {
+    if (window.confirm("Delete this message?")) {
+      update(msgRef(msgId), { deleted: true });
+    }
+  }
+
+  function handleClearAll() {
+    if (window.confirm("⚠️ DELETE ALL MESSAGES? This cannot be undone! ⚠️")) {
+      messages.forEach(msg => {
+        update(msgRef(msg.id), { deleted: true });
+      });
+    }
+  }
+
+  const hasMessages = messages.length > 0;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "var(--bg)" }}>
@@ -402,14 +582,17 @@ function UserView() {
         boxShadow: "0 2px 20px rgba(0,0,0,0.5)",
       }}>
         <Logo />
-        <div style={{
-          fontSize: 10, fontFamily: "var(--font-ui)", color: "var(--muted)",
-          background: "var(--bg2)", border: "1px solid var(--border)",
-          borderRadius: 20, padding: "4px 10px",
-          display: "flex", alignItems: "center", gap: 6,
-        }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)", display: "inline-block", boxShadow: "0 0 6px var(--green)" }} />
-          {userId}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <ClearChatButton onClear={handleClearAll} disabled={!hasMessages} />
+          <div style={{
+            fontSize: 10, fontFamily: "var(--font-ui)", color: "var(--muted)",
+            background: "var(--bg2)", border: "1px solid var(--border)",
+            borderRadius: 20, padding: "4px 10px",
+            display: "flex", alignItems: "center", gap: 6,
+          }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)", display: "inline-block", boxShadow: "0 0 6px var(--green)" }} />
+            {userId}
+          </div>
         </div>
       </div>
 
@@ -418,16 +601,28 @@ function UserView() {
           <div style={{ textAlign: "center", marginTop: 60, color: "var(--muted)", fontFamily: "var(--font-ui)" }}>
             <Icon name="chat" size={40} style={{ color: "var(--border)", marginBottom: 12 }} />
             <div style={{ fontSize: 12, letterSpacing: 2 }}>BEGIN TRANSMISSION</div>
-            <div style={{ fontSize: 10, marginTop: 6, opacity: 0.6 }}>Messages auto-destruct after timer expires</div>
+            <div style={{ fontSize: 10, marginTop: 6, opacity: 0.6 }}>Send text or images with timers for secure messaging</div>
           </div>
         )}
         {messages.map(msg => (
-          <MessageBubble key={msg.id} msg={msg} isAdmin={false} onUnlock={handleUnlock} />
+          <MessageBubble 
+            key={msg.id} 
+            msg={msg} 
+            currentUserId={userId}
+            isAdmin={false} 
+            onUnlock={handleUnlock} 
+            onDelete={handleDelete}
+          />
         ))}
         <div ref={bottomRef} />
       </div>
 
-      <InputRow onSend={handleSend} placeholder="TYPE YOUR MESSAGE..." />
+      <InputRow 
+        onSend={handleSend} 
+        onSendImage={handleSendImage}
+        placeholder="TYPE YOUR MESSAGE..." 
+        uploading={uploading}
+      />
     </div>
   );
 }
@@ -442,7 +637,8 @@ function AdminLogin({ onLogin }) {
   const [shake, setShake] = useState(false);
 
   function handleLogin() {
-    if (email === "augusdavik@gmail.com" && pass === "admin123") {
+    // Email placeholder is dontBeACunt@gmail.com as you requested
+    if (email === "dontBeACunt@gmail.com" && pass === "admin123") {
       onLogin();
     } else {
       setErr("ACCESS DENIED — INVALID CREDENTIALS");
@@ -500,10 +696,7 @@ function AdminLogin({ onLogin }) {
           border: "none", borderRadius: 8, color: "#fff", cursor: "pointer",
           fontSize: 12, fontFamily: "var(--font-head)", letterSpacing: 3, fontWeight: 700,
           boxShadow: "0 0 20px rgba(124,58,237,0.5)", transition: "all 0.2s",
-        }}
-          onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 0 32px rgba(168,85,247,0.8)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-          onMouseLeave={e => { e.currentTarget.style.boxShadow = "0 0 20px rgba(124,58,237,0.5)"; e.currentTarget.style.transform = "translateY(0)"; }}
-        >
+        }}>
           AUTHENTICATE
         </button>
       </div>
@@ -519,9 +712,9 @@ function AdminPanel({ onLogout }) {
   const [users, setUsers]             = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [uploading, setUploading] = useState(false);
   const bottomRef = useRef(null);
 
-  // Listen to all messages
   useEffect(() => {
     const unsub = onValue(msgsRef(), snap => {
       const data = snap.val() || {};
@@ -534,7 +727,6 @@ function AdminPanel({ onLogout }) {
     return () => unsub();
   }, []);
 
-  // Listen to all users
   useEffect(() => {
     const unsub = onValue(usersRef(), snap => {
       const data = snap.val() || {};
@@ -543,16 +735,13 @@ function AdminPanel({ onLogout }) {
     return () => unsub();
   }, []);
 
-  // Countdown tick for admin panel - ONLY for unlocked messages
   useEffect(() => {
     const interval = setInterval(() => {
       setMessages(prev => {
         let hasChanges = false;
         const updated = prev.map(msg => {
-          // Skip locked messages
-          if (msg.locked === true) return msg;
-          // Skip messages without countdown
           if (msg.countdown == null || msg.countdown <= 0) return msg;
+          if (msg.locked === true) return msg;
           
           const newCountdown = msg.countdown - 1;
           hasChanges = true;
@@ -581,6 +770,30 @@ function AdminPanel({ onLogout }) {
     ? messages.filter(m => m.userId === selectedUser)
     : [];
 
+  async function handleSendImage(file, timerSeconds) {
+    if (!selectedUser || !file) return;
+    setUploading(true);
+    try {
+      const imageUrl = await uploadToCloudinary(file);
+      push(msgsRef(), {
+        userId: selectedUser,
+        from: "admin",
+        type: "image",
+        imageUrl,
+        ts: Date.now(),
+        timerSeconds: timerSeconds || null,
+        countdown: null,
+        locked: timerSeconds ? true : false,
+        deleted: false,
+      });
+    } catch (error) {
+      console.error("Upload failed:", error);
+      alert("Image upload failed. Check Cloudinary config.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
   function handleSend(text, timerSeconds) {
     if (!selectedUser) return;
     push(msgsRef(), {
@@ -589,13 +802,12 @@ function AdminPanel({ onLogout }) {
       text,
       ts: Date.now(),
       timerSeconds: timerSeconds || null,
-      countdown: null,  // Admin's own messages don't have timer for admin
-      locked: timerSeconds ? true : false,  // Lock if timer is set
+      countdown: null,
+      locked: timerSeconds ? true : false,
       deleted: false,
     });
   }
 
-  // Admin unlocks a message (for their own view)
   function handleUnlock(msgId) {
     const msg = messages.find(m => m.id === msgId);
     if (!msg) return;
@@ -605,15 +817,31 @@ function AdminPanel({ onLogout }) {
     });
   }
 
-  // Count unread (locked user messages that admin hasn't unlocked)
+  function handleDelete(msgId) {
+    if (window.confirm("Delete this message?")) {
+      update(msgRef(msgId), { deleted: true });
+    }
+  }
+
+  function handleClearUserChat() {
+    if (!selectedUser) return;
+    if (window.confirm(`⚠️ DELETE ALL MESSAGES with ${selectedUser}? This cannot be undone! ⚠️`)) {
+      const userMessages = messages.filter(m => m.userId === selectedUser);
+      userMessages.forEach(msg => {
+        update(msgRef(msg.id), { deleted: true });
+      });
+    }
+  }
+
   const unreadCount = uid =>
-    messages.filter(m => m.userId === uid && m.from === "user" && m.locked === true).length;
+    messages.filter(m => m.userId === uid && m.from !== "admin" && m.locked === true && m.timerSeconds > 0).length;
+
+  const hasMessages = threadMessages.length > 0;
 
   return (
     <div style={{ display: "flex", height: "100vh", background: "var(--bg)", overflow: "hidden" }}>
-      {/* Sidebar */}
       <div style={{
-        width: sidebarOpen ? 200 : 52, flexShrink: 0,
+        width: sidebarOpen ? 220 : 52, flexShrink: 0,
         background: "var(--panel)", borderRight: "1px solid var(--border)",
         display: "flex", flexDirection: "column",
         transition: "width 0.25s ease", overflow: "hidden",
@@ -667,7 +895,7 @@ function AdminPanel({ onLogout }) {
                     </div>
                     {count > 0 && (
                       <div style={{ fontSize: 9, color: "var(--red)", marginTop: 1 }}>
-                        {count} locked msg{count > 1 ? "s" : ""}
+                        🔒 {count} encrypted
                       </div>
                     )}
                   </div>
@@ -700,17 +928,13 @@ function AdminPanel({ onLogout }) {
             fontFamily: "var(--font-ui)", letterSpacing: 1,
             transition: "all 0.2s",
             display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-          }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--red)"; e.currentTarget.style.color = "var(--red)"; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.color = "var(--muted)"; }}
-          >
+          }}>
             <Icon name="logout" size={13} />
             {sidebarOpen && "LOGOUT"}
           </button>
         </div>
       </div>
 
-      {/* Main Chat Area */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <div style={{
           padding: "12px 20px", background: "var(--panel)",
@@ -719,19 +943,24 @@ function AdminPanel({ onLogout }) {
           boxShadow: "0 2px 20px rgba(0,0,0,0.5)",
         }}>
           <Logo />
-          {selectedUser ? (
-            <div style={{
-              fontSize: 10, fontFamily: "var(--font-ui)", color: "var(--glow)",
-              background: "rgba(124,58,237,0.1)", border: "1px solid var(--purple)",
-              borderRadius: 20, padding: "4px 12px",
-            }}>
-              CHATTING: {selectedUser}
-            </div>
-          ) : (
-            <div style={{ fontSize: 10, color: "var(--muted)", fontFamily: "var(--font-ui)", letterSpacing: 2 }}>
-              SELECT A USER
-            </div>
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {selectedUser && (
+              <ClearChatButton onClear={handleClearUserChat} disabled={!hasMessages} />
+            )}
+            {selectedUser ? (
+              <div style={{
+                fontSize: 10, fontFamily: "var(--font-ui)", color: "var(--glow)",
+                background: "rgba(124,58,237,0.1)", border: "1px solid var(--purple)",
+                borderRadius: 20, padding: "4px 12px",
+              }}>
+                CHATTING: {selectedUser}
+              </div>
+            ) : (
+              <div style={{ fontSize: 10, color: "var(--muted)", fontFamily: "var(--font-ui)", letterSpacing: 2 }}>
+                SELECT A USER
+              </div>
+            )}
+          </div>
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
@@ -745,17 +974,30 @@ function AdminPanel({ onLogout }) {
           ) : threadMessages.length === 0 ? (
             <div style={{ textAlign: "center", marginTop: 80, color: "var(--muted)" }}>
               <div style={{ fontSize: 12, fontFamily: "var(--font-ui)", letterSpacing: 2 }}>NO MESSAGES YET</div>
+              <div style={{ fontSize: 10, marginTop: 8, opacity: 0.6 }}>Send a message with a timer to encrypt it</div>
             </div>
           ) : (
             threadMessages.map(msg => (
-              <MessageBubble key={msg.id} msg={msg} isAdmin={true} onUnlock={handleUnlock} />
+              <MessageBubble 
+                key={msg.id} 
+                msg={msg} 
+                currentUserId="admin"
+                isAdmin={true} 
+                onUnlock={handleUnlock} 
+                onDelete={handleDelete}
+              />
             ))
           )}
           <div ref={bottomRef} />
         </div>
 
         {selectedUser && (
-          <InputRow onSend={handleSend} placeholder={`REPLY TO ${selectedUser}...`} />
+          <InputRow 
+            onSend={handleSend} 
+            onSendImage={handleSendImage}
+            placeholder={`REPLY TO ${selectedUser}...`}
+            uploading={uploading}
+          />
         )}
       </div>
     </div>
