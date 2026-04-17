@@ -682,7 +682,7 @@ function AdminLogin({ onLogin }) {
 
         <div style={{ fontSize: 10, color: "var(--muted)", fontFamily: "var(--font-ui)", letterSpacing: 2, marginBottom: 6 }}>EMAIL</div>
         <input type="text" value={email} onChange={e => setEmail(e.target.value)}
-          placeholder="DontBeACunt" style={inp}
+          placeholder="DontBeACunt@gmail.com" style={inp}
           onKeyDown={e => e.key === "Enter" && handleLogin()} />
 
         <div style={{ fontSize: 10, color: "var(--muted)", fontFamily: "var(--font-ui)", letterSpacing: 2, marginBottom: 6 }}>PASSWORD</div>
