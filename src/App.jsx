@@ -642,7 +642,7 @@ function AdminLogin({ onLogin }) {
   const [shake, setShake] = useState(false);
 
   function handleLogin() {
-    if (email === "DontBeACunt" && pass === "admin123") {
+    if (email === "DontBeACunt@gmail.com" && pass === "admin123") {
       onLogin();
     } else {
       setErr("ACCESS DENIED — INVALID CREDENTIALS");
